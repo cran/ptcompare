@@ -1,4 +1,4 @@
-# Statistical and computational specification (version 0.1.0)
+# Statistical and computational specification (version 0.1.1)
 
 ## Scope and conditioning
 

@@ -1,19 +1,29 @@
-# ptcompare — 解釈可能な多変量二標本比較
+# ptcompare: interpretable multivariate two-sample comparison
 
-二つの集団の分布を比較し、全体の差の事後確率と、変数の閾値で説明できる局所的な差を返すRパッケージです。Awaya–Maのhidden Markov Pólya treeの枠組みに基づき、適応的な分割木をSMCで探索し、木を与えた状態推論をmessage passingで計算します。
+`ptcompare` compares the distributions of two samples of continuous
+multivariate observations. It returns the posterior probability that the two
+distributions differ, and describes where they differ as regions defined by
+thresholds on the variables. The method is the hidden Markov Pólya tree of
+Awaya and Ma (2024). Adaptive partition trees are explored by sequential Monte
+Carlo (SMC), and the latent states given a tree are computed by message
+passing.
 
-現在のバージョンは0.1.0です。CRAN提出の準備中です。
+## Installation
 
-## インストール
+From CRAN:
 
-RcppとC++コンパイラが必要です。WindowsではRtoolsを用意してください。
+```r
+install.packages("ptcompare")
+```
+
+The development version from GitHub needs a C++ compiler (Rtools on Windows):
 
 ```r
 # install.packages("remotes")
 remotes::install_github("nawaya040/ptcompare")
 ```
 
-## 使い方
+## Usage
 
 ```r
 library(ptcompare)
@@ -23,41 +33,48 @@ x <- matrix(rnorm(400), ncol = 2, dimnames = list(NULL, c("marker_A", "marker_B"
 y <- matrix(rnorm(400, mean = 0.8), ncol = 2, dimnames = list(NULL, c("marker_A", "marker_B")))
 
 fit <- compare_pt(x, y)
-fit                            # 全体の差の事後確率
-summary(fit)                   # 設定、計算の報告、差の大きい分割
-regions(fit, prob = 0.9)       # 差のある領域の一覧
+fit                            # posterior probability of an overall difference
+summary(fit)                   # settings, computation report, divisions with the largest differences
+regions(fit, prob = 0.9)       # table of regions where the groups differ
 
-plot(fit)                      # 代表木
-plot(fit, type = "regions")    # 効果の大きい領域を散布図で並べる
-plot(fit, type = "levels")     # 2変数のとき: 木の深さごとに差の確率で塗り分け
+plot(fit)                      # representative tree
+plot(fit, type = "regions")    # regions with the largest effects, drawn over the data
+plot(fit, type = "levels")     # two variables only: regions at each depth shaded by probability of a difference
 ```
 
 ## Vignette
-
-パッケージの紹介は vignette にまとめています（CRAN提出を見据えて英語）。
 
 ```r
 vignette("ptcompare")
 ```
 
-2変量のシミュレーション（仕込んだ差を復元できることを確認）、`mclust::wdbc` の細胞核30変数の解析（サイズでは説明がつかない局所的な差）、差がないデータでの挙動、の3部構成です。
+The vignette has three parts: a simulation in two variables where a difference
+placed in a small part of the plane is recovered, an analysis of 30
+measurements of cell nuclei from `mclust::wdbc` where the groups are two
+diagnoses and the difference is not explained by nucleus size alone, and a
+pair of samples drawn from the same distribution.
 
-## 自分のデータを比較する
+## Comparing your own data
 
-`x` と `y` は、同じ列を同じ順序で持つ数値行列または数値だけのdata.frameです。
+`x` and `y` are numeric matrices, or data frames with only numeric columns,
+with the same columns in the same order.
 
 ```r
 library(ptcompare)
 set.seed(123)
 fit <- compare_pt(x, y)
 
-# 二群のデータをまとめた形式にも対応
+# Data with both groups in one data frame and a group column
 fit <- compare_pt(data, group = condition)
 ```
 
-独立な二標本を対象にしています。NA/Infはエラーとなり、二群を合わせても定数である列は警告付きで除外します。群ラベルがfactorならlevelsの順、その他のベクトルなら最初に現れた順で群1・群2を決めます。
+The two samples are treated as independent. `NA` and `Inf` values give an
+error. Columns that are constant over both groups combined are dropped with a
+warning. When the group variable is a factor, its levels give group 1 and
+group 2 in order; otherwise the order of first appearance is used.
 
-計算予算と統計モデルは、別の引数で指定します。
+The computational budget and the statistical model are set by separate
+arguments.
 
 ```r
 fit <- compare_pt(
@@ -68,94 +85,178 @@ fit <- compare_pt(
 diagnostics(fit)
 ```
 
-既定の `pt_prior(midpoint_spike = TRUE)` は論文Appendix Aのspike-and-slab型の分割位置事前です。あるノードを中点で分割すると、その子孫もすべて中点で分割します。すべてのノードで論文の式(2)を使う場合は `midpoint_spike = FALSE` を指定します。
+`control` sets how the posterior is computed. The number of particles
+determines the accuracy of the SMC approximation. `prior` sets the model: the
+maximum tree depth, the number of candidate split points and the prior
+probabilities define the posterior being computed.
 
-再標本化は論文Section 3.1と同じく、重みのκ乗に比例して祖先を選び、重みをW/aで補正します（既定 `pt_control(resample_power = 0.5)`、`1` で通常の再標本化）。粒子数はSMCの近似精度に関わります。木の深さ、分割候補数、事前確率は推論モデルを変更します。
+The default `pt_prior(midpoint_spike = TRUE)` is the spike-and-slab prior on
+split locations in Appendix A of the paper: once a region is divided at its
+midpoint, all of its descendants are also divided at their midpoints. With
+`midpoint_spike = FALSE`, equation (2) of the paper is used at every node.
 
-## 変換の選択
+Resampling follows Section 3.1 of the paper. Ancestors are drawn with
+probability proportional to the weights raised to the power κ, and the weights
+are then corrected by W/a. The default is `pt_control(resample_power = 0.5)`;
+`resample_power = 1` gives standard resampling.
 
-範囲を指定しない `compare_pt(x, y)` は、二群共通の順位変換を既定としています。既知の範囲を `support = cbind(lower, upper)` で指定した場合は、線形変換が既定になります。使用した変換は推定結果に保存され、summaryで表示されます。
+## Transformation of the variables
 
-```r
-fit_rank  <- compare_pt(x, y)                       # 既定: transform = "rank"
-fit_paper <- compare_pt(x, y, transform = "range")  # 論文の線形変換
-```
-
-`transform = "range"` は論文と同じく、各変数を線形変換で単位区間へ移します。supportを省略すると共通範囲に1%ずつ余裕を加えます。`"rank"` は二群を合わせたmidrankを[0,1]へ移します。群ごとに順位を付ける操作は行いません。変数名、閾値、領域の条件は保存した逆変換によって元の単位で表示されます。同値を保ち、jitterは加えません。
-
-順位変換は元の座標における分割事前と末端分布を変更します。その事後確率は推定した変換に条件付けたもので、変換自体の不確実性を積分していません。
-
-## 結果の読み方
-
-`fit$prob_difference` は有限モデルにおける全体の差の事後確率であり、SMCの木について平均しています。p値ではありません。
-
-`regions()` の各行は代表木の内部ノードです。`condition` で示される領域の中で、`variable <= threshold` の左側へ入る条件付き確率が二群で異なるかを調べています。`prob_difference` はその局所分割の差の事後確率、`effect` は群1対群2の符号付きlog odds ratioの事後平均です。正なら群1の方が左側へ入りやすいという意味になります。`effect_abs` は絶対log odds ratioの事後平均、`lower` と `upper` は差なしの点質量も含む95%信用区間です。
-
-`regions()` は既定で `prob_difference` の大きい順に並びます。効果量の大きい順にする場合は `rank_by = "effect"` を指定します（`plot(fit, type="regions")` と同じ語彙です）。
-
-差の大きい領域の観測そのものを取り出すには `region_rows()` と `region_data()` を使います。
+The model is defined on the unit cube, so each variable is first mapped to
+[0, 1]. Without a `support` argument, `compare_pt(x, y)` uses a rank
+transformation computed from both groups together. When the known range of
+each variable is given as `support = cbind(lower, upper)`, a linear
+transformation is the default. The transformation used is stored in the result
+and shown by `summary()`.
 
 ```r
-top <- regions(fit, prob = 0.9)$node_id[1]   # 差が最も大きい領域
-region_data(fit, top)                        # その領域の観測（群のラベル付き）
-mydata[region_rows(fit, top), ]              # 元のdata.frameを同じ条件で絞る
+fit_rank  <- compare_pt(x, y)                       # default: transform = "rank"
+fit_paper <- compare_pt(x, y, transform = "range")  # linear transformation as in the paper
 ```
 
-`region_rows()` は観測ごとのTRUE/FALSEを、`compare_pt()` に渡した順（`x`の行、続いて`y`の行。`group=`を使った場合は元のdata.frameの行順）で返します。どちらも推定時にデータを保持している必要があります（既定で保持、`pt_control(keep_data = FALSE)` を指定した場合は不可）。
+`transform = "range"` maps each variable linearly onto the unit interval, as in
+the paper. When `support` is omitted, the common range of the two groups is
+widened by 1% on each side. `transform = "rank"` maps the midranks of the
+pooled sample onto [0, 1]; the groups are not ranked separately. Ties are kept
+as ties and no jitter is added. Variable names, thresholds and region
+conditions are reported in the original units through the stored inverse
+transformation.
 
-これらの局所量は代表木に条件付けた結果です。代表木はサンプルした候補の中で事後スコアが最大のものを選びます。抽出した領域は親子関係で重なる場合があり、確率閾値による抽出に頻度論的な多重検定保証は付けていません。
+## Reading the results
 
-図は表示深さで切り詰められ、`+` は下に枝が続くことを示します。図の切り詰めによって推定結果は変わりません。`plot(fit, type="regions")` は差の大きい領域（既定では `prob_difference` が0.5以上で各群50観測以上、最大9個）を並べます。2変数以上では各領域を散布図上の枠として示して枠内の観測を群ごとの記号で描き、1変数では領域内の2群の分布を描きます。`node=` で特定の領域を指定でき、1つだけなら大きな1枚になります。`type="levels"`（2変数のみ）は木の深さごとに領域を差の確率の濃淡で塗ります。
+`fit$prob_difference` is the posterior probability, under the model, that the
+two distributions differ anywhere in the data space. It is averaged over the
+trees in the SMC sample. A value near 1 means the data support a difference; a
+value near 0 means they support equal distributions.
 
-モデル、SMCの目標分布、全体帰無確率、効果量の定義は統計仕様にまとめています。
+Each row of `regions()` is an internal node of the representative tree, which
+is the sampled tree with the highest posterior score. Inside the region given
+by `condition`, the observations are divided into those with
+`variable <= threshold` (the left part) and the rest. The row describes whether
+the two groups fall into the left part in different proportions:
+
+- `prob_difference`: posterior probability that the proportions differ at this
+  division.
+- `effect`: posterior mean of the log odds ratio of falling into the left part,
+  group 1 versus group 2. Positive values mean group 1 is more likely to be in
+  the left part.
+- `effect_abs`: posterior mean of the absolute log odds ratio, the size of the
+  difference regardless of direction.
+- `lower`, `upper`: 95% credible interval for the log odds ratio. The posterior
+  includes a point mass at no difference, so a limit can be exactly 0.
+
+By default `regions()` sorts the rows by `prob_difference`. Use
+`rank_by = "effect"` to sort by effect size; `plot(fit, type = "regions")` uses
+the same argument.
+
+`region_rows()` and `region_data()` return the observations in one region.
+
+```r
+top <- regions(fit, prob = 0.9)$node_id[1]   # region with the largest difference
+region_data(fit, top)                        # its observations, with group labels
+mydata[region_rows(fit, top), ]              # the same rows of the original data frame
+```
+
+`region_rows()` returns one `TRUE`/`FALSE` per observation, in the order passed
+to `compare_pt()`: the rows of `x` followed by the rows of `y`, or the row
+order of the original data frame when `group =` is used. Both functions need
+the data stored in the result, which is the default
+(`pt_control(keep_data = TRUE)`).
+
+Tree plots are cut at a display depth, and `+` marks a node with further
+branches below it. The cut affects only the plot. `plot(fit, type = "regions")`
+draws the regions with the largest differences (by default those with
+`prob_difference` of at least 0.5 and at least 50 observations of each group,
+up to 9 regions). With two or more variables, each region is drawn as a box on
+a scatter plot, with the observations
+inside the box marked by group. With one variable, the distributions of the two
+groups within the region are drawn. `node =` selects specific regions; a single
+region is drawn as one large panel. `type = "levels"` (two variables only)
+shades the regions at each depth of the tree by their probability of a
+difference.
+
+The model, the SMC target distribution, the overall null probability and the
+effect sizes are defined in the statistical specification.
 
 ```r
 file.show(system.file("STATISTICAL-SPECIFICATION.md", package = "ptcompare"))
 ```
 
-## リポジトリから使う場合
+## Using the repository
 
-以下はソースをクローンした場合の手順で、インストール済みパッケージには含まれません。
+The following files are in the source repository and are not part of the
+installed package.
 
-**ptcompare.Rproj** を開き、Consoleで次を一度実行するとプロジェクト内の `.local-library` へインストールされます。ソースを修正して再インストールする場合も、RStudioのSession → Restart Rを先に実行してください。
+Open **ptcompare.Rproj** and run the following once in the Console. It
+installs the package into `.local-library` inside the project. After changing
+the source, run Session → Restart R in RStudio before installing again.
 
 ```r
 source("scripts/install-local.R")
 source("examples/01-local-shift.R")
 ```
 
-`fit`、`region_table`、`x`、`y` がEnvironmentに残り、Plotsペインに木、局所領域の比較、計算診断が表示されます。Plotsの戻る矢印で前の図を確認できます。
+The script leaves `fit`, `region_table`, `x` and `y` in the Environment and
+draws the tree, the comparison of local regions and the computational
+diagnostics in the Plots pane. Use the back arrow in the Plots pane to see
+earlier plots.
 
-| ファイル | 確認できること |
+| File | Contents |
 | --- | --- |
-| `examples/00-tryout.R` | 試用スクリプト。基本操作、結果の読み方、iris での実データ例、設定の変え方を順に実行（全体で約10秒） |
-| `examples/00-tryout-dimensions.R` | 1変量・2変量・3変量を同じ順番でたどり、次元ごとの見え方を比べる |
-| `examples/01-local-shift.R` | 既知の部分集団だけに分布差がある2変量データ |
-| `examples/02-dependence-and-null.R` | 周辺分布が同じで相関だけが異なる例（2変量・3変量）と、帰無分布の例 |
-| `examples/03-stability.R` | 同じデータ・同じモデルで粒子数と乱数seedを変えて実行 |
-| `examples/04-high-dimensional.R` | 20変量の例。既定の順位変換と、論文の線形変換の両方で実行 |
+| `examples/00-tryout.R` | Basic use, reading the results, an example with `iris`, and changing the settings (about 10 seconds in total) |
+| `examples/00-tryout-dimensions.R` | The same steps in one, two and three variables, to compare how the output looks in each case |
+| `examples/01-local-shift.R` | Two variables, with a difference only in a known subpopulation |
+| `examples/02-dependence-and-null.R` | Equal marginal distributions with different correlation (two and three variables), and two samples from the same distribution |
+| `examples/03-stability.R` | The same data and model fitted with different numbers of particles and random seeds |
+| `examples/04-high-dimensional.R` | Twenty variables, fitted with the default rank transformation and with the linear transformation of the paper |
 
-複数回の推定を行う3番目の例は、1回の推定より時間がかかります。実行時間はデータとモデル設定に依存します。
+The third example fits the model several times and takes longer than a single
+fit. Run time depends on the data and the model settings.
 
-## 検証・再現
+## Verification and reproduction
 
-これらもリポジトリ内のみです。
+These files are also only in the repository.
 
-- `tests/testthat/`: 独立なR全列挙による固定木・適応木の検証とAPIテスト。
-- `evaluation/REPORT.md`: 開発時の検証記録（反復実験、比較手法、計算性能）。
-- `evaluation/results/`: seed付きの実験結果CSVと実行環境。
+- `tests/testthat/`: checks of fixed and adaptive trees against an independent
+  enumeration in R, and tests of the API.
+- `evaluation/REPORT.md`: record of the checks made during development
+  (repeated simulations, comparison methods, computational cost).
+- `evaluation/results/`: simulation results as CSV files with seeds, and the
+  computing environment.
 
 ```r
 source("scripts/load-local.R")
 testthat::test_dir("tests/testthat")
 
-# 評価の再実行。study/rank-studyは既存CSVがあれば未完了分だけ進める。
+# Rerun the evaluation. The study and rank-study scripts resume from existing CSV files.
 source("evaluation/run-study.R")
 source("evaluation/run-rank-study.R")
 source("evaluation/run-verification.R")
 source("evaluation/summarize.R")
 ```
 
-比較実験には追加でMRSパッケージを使います。Windowsでの別プロセスのメモリ測定は `evaluation/run-benchmarks.ps1` にあります。計算核のベンチマークは `evaluation/kernel-benchmark.cpp` です。
+The comparison with other methods also uses the MRS package. Memory use in a
+separate process on Windows is measured by `evaluation/run-benchmarks.ps1`, and
+the benchmark of the computational kernel is `evaluation/kernel-benchmark.cpp`.
 
-参考文献: Awaya, N. and Ma, L. (2024), *Hidden Markov Pólya Trees for High-Dimensional Distributions*, JASA 119(545), 189–201, [doi:10.1080/01621459.2022.2105223](https://doi.org/10.1080/01621459.2022.2105223)。MRSの状態モデルはSoriano and Ma (2017), [doi:10.1111/rssb.12180](https://doi.org/10.1111/rssb.12180) に基づきます。
+## Notes
+
+- With `transform = "rank"`, the posterior is conditional on the estimated
+  transformation; its uncertainty is not integrated over. The transformation
+  also changes the split prior and the terminal distributions in the original
+  coordinates.
+- The local quantities from `regions()` are conditional on the representative
+  tree. Regions can overlap through parent–child relations, and selecting
+  regions by a probability threshold carries no frequentist multiple-testing
+  guarantee.
+
+## References
+
+Awaya, N. and Ma, L. (2024). Hidden Markov Pólya trees for high-dimensional
+distributions. *Journal of the American Statistical Association*, 119(545),
+189–201. [doi:10.1080/01621459.2022.2105223](https://doi.org/10.1080/01621459.2022.2105223)
+
+The state model follows the MRS model of Soriano, J. and Ma, L. (2017).
+Probabilistic multi-resolution scanning for two-sample differences. *Journal of
+the Royal Statistical Society: Series B*, 79(2), 547–572.
+[doi:10.1111/rssb.12180](https://doi.org/10.1111/rssb.12180)

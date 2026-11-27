@@ -1,3 +1,7 @@
+# ptcompare 0.1.1
+
+* The README is now written in English. No R or C++ code has changed.
+
 # ptcompare 0.1.0
 
 First release.
